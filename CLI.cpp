@@ -1,6 +1,9 @@
+//==============================================================================
+// CarLink CLI Library
 // SPDX-License-Identifier: GPL-3.0
 // Copyright (c) 2024 Kogbi
-// Author: Kogbi
+// Author: Kogbi <kogbi0209@outlook.com>
+//==============================================================================
 
 #include "CLI.h"
 #include <algorithm>

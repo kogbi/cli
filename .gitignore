@@ -1,0 +1,43 @@
+# Build directories
+build/
+build*/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!CarLinkCLIConfig.cmake.in
+
+# Compiled object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Libraries
+*.a
+*.la
+*.lib
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Install files
+install_manifest.txt
