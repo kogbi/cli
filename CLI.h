@@ -1,13 +1,7 @@
-//==============================================================================
-// CarLink CLI Library
-// SPDX-License-Identifier: GPL-3.0
-// Copyright (c) 2024 Kogbi
-// Author: Kogbi <kogbi0209@outlook.com>
-//==============================================================================
-
 #pragma once
 
 #include <cerrno>
+#include <atomic>
 #include <cstdlib>
 #include <functional>
 #include <map>
@@ -296,7 +290,11 @@ public:
                          TreeCompleter completer = nullptr,
                          ParamValidator validator = nullptr);
 
+    static bool isCommandRunning();
+
 private:
+    struct CommandInfo;
+
     // 内置命令
     void cmdHelp(const std::vector<std::string>& args);
     void cmdExit(const std::vector<std::string>& args);
@@ -313,6 +311,9 @@ private:
     void printPrompt();
     std::vector<std::string> parseCommandLine(const std::string& line);
     bool executeCommand(const std::vector<std::string>& tokens);
+    bool invokeCommand(const CommandInfo& info,
+                       const std::vector<std::string>& tokens,
+                       bool monitorCtrlD);
 
     // Tab 自动补全
     static CLI* instance_;
@@ -333,6 +334,7 @@ private:
     std::map<std::string, CommandInfo> commands_;
 
     bool running_;
+    std::atomic<bool> commandRunning_{false};
 };
 
 }   // namespace cli

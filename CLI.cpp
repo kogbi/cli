@@ -1,8 +1,8 @@
 //==============================================================================
-// CarLink CLI Library
-// SPDX-License-Identifier: GPL-3.0
+// CarLink Service Control CLI
+// Date: 2026-02-11
 // Copyright (c) 2024 Kogbi
-// Author: Kogbi <kogbi0209@outlook.com>
+// Author: Kogbi
 //==============================================================================
 
 #include "CLI.h"
@@ -10,10 +10,14 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <iostream>
+#include <poll.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <sstream>
+#include <thread>
+#include <unistd.h>
 
 namespace carlink {
 namespace cli {
@@ -23,6 +27,10 @@ CLI* CLI::instance_ = nullptr;
 static void signalHandler(int signum)
 {
     (void)signum;
+
+    if (CLI::isCommandRunning()) {
+        return;
+    }
 
     std::cout << "\n"
               << Color::YELLOW
@@ -54,6 +62,14 @@ CLI::CLI()
 
     registerCommand("clear", "Clear the screen",
                     [this](const std::vector<std::string>& args) { cmdClear(args); });
+}
+
+bool CLI::isCommandRunning()
+{
+    if (!instance_) {
+        return false;
+    }
+    return instance_->commandRunning_.load();
 }
 
 void CLI::registerCommand(const std::string& name,
@@ -111,30 +127,91 @@ bool CLI::executeCommand(const std::vector<std::string>& tokens)
 
     auto it = commands_.find(cmd);
     if (it != commands_.end()) {
-        try {
-            // 如果有验证器，先验证参数
-            if (it->second.validator) {
-                std::string error = it->second.validator(tokens);
-                if (!error.empty()) {
-                    std::cout << Color::RED << error << Color::RESET << std::endl;
-                    return true;  // 验证失败，不调用 handler
-                }
-            }
-            
-            // 验证通过，调用 handler
-            it->second.handler(tokens);
-        }
-        catch (const std::exception& e) {
-            std::cout << Color::RED << "Error: " << e.what()
-                      << Color::RESET << std::endl;
-        }
-        return true;
+        return invokeCommand(it->second, tokens, true);
     }
 
     std::cout << Color::RED << "Unknown command: " << cmd
               << ". Type 'help' for available commands."
               << Color::RESET << std::endl;
     return false;
+}
+
+bool CLI::invokeCommand(const CommandInfo& info,
+                        const std::vector<std::string>& tokens,
+                        bool monitorCtrlD)
+{
+    try {
+        if (info.validator) {
+            std::string error = info.validator(tokens);
+            if (!error.empty()) {
+                std::cout << Color::RED << error << Color::RESET << std::endl;
+                return true;
+            }
+        }
+
+        if (!monitorCtrlD) {
+            info.handler(tokens);
+            return true;
+        }
+
+        std::exception_ptr workerException;
+        std::atomic<bool> finished{false};
+        commandRunning_.store(true);
+
+        std::thread worker([&]() {
+            try {
+                info.handler(tokens);
+            }
+            catch (...) {
+                workerException = std::current_exception();
+            }
+            finished.store(true);
+        });
+
+        while (!finished.load()) {
+            struct pollfd pfd;
+            pfd.fd = STDIN_FILENO;
+            pfd.events = POLLIN | POLLHUP | POLLERR;
+            pfd.revents = 0;
+
+            int ret = poll(&pfd, 1, 100);
+            if (ret <= 0) {
+                continue;
+            }
+
+            if (pfd.revents & (POLLIN | POLLHUP)) {
+                char buffer[64] = {0};
+                ssize_t n = read(STDIN_FILENO, buffer, sizeof(buffer));
+                if (n == 0) {
+                    std::cout << Color::CYAN << "\nGoodbye!" << Color::RESET << std::endl;
+                    std::cout.flush();
+                    std::_Exit(0);
+                }
+
+                for (ssize_t i = 0; i < n; ++i) {
+                    if (buffer[i] == 0x04) {
+                        std::cout << Color::CYAN << "\nGoodbye!" << Color::RESET << std::endl;
+                        std::cout.flush();
+                        std::_Exit(0);
+                    }
+                }
+            }
+        }
+
+        worker.join();
+        commandRunning_.store(false);
+
+        if (workerException) {
+            std::rethrow_exception(workerException);
+        }
+    }
+    catch (const std::exception& e) {
+        commandRunning_.store(false);
+        std::cout << Color::RED << "Error: " << e.what()
+                  << Color::RESET << std::endl;
+    }
+
+    return true;
 }
 
 void CLI::cmdHelp(const std::vector<std::string>& args)
@@ -238,7 +315,16 @@ void CLI::runSingleCommand(const std::vector<std::string>& args)
         return;
     }
 
-    executeCommand(args);
+    const std::string& cmd = args[0];
+    auto it = commands_.find(cmd);
+    if (it != commands_.end()) {
+        invokeCommand(it->second, args, false);
+        return;
+    }
+
+    std::cout << Color::RED << "Unknown command: " << cmd
+              << ". Type 'help' for available commands."
+              << Color::RESET << std::endl;
 }
 
 std::vector<std::string> CLI::getCommandList() const
